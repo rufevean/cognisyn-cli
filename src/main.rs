@@ -1,15 +1,15 @@
 
-
 use clap::Parser;
 use reqwest::Client;
 use serde_json::json;
 use std::{env, process::exit};
+use serde_json::Value;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
     #[clap(short, long)]
-    prompt: String,
+    prompt: Vec<String>,
 }
 
 #[tokio::main]
@@ -22,27 +22,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
     let prompt = args.prompt;
     let client = Client::new();
+    let api_base = env::var("OPENAI_API_BASE")
+            .unwrap_or_else(|_| String::from("https://api.openai.com/v1"));
+ 
+    let api_addr = format!("{}/completions", api_base);
 
-    let response: reqwest::Response = client
-        .post("https://api.openai.com/v1/engines/davinci/completions")
-        .json(&json!({
-            "prompt": build_prompt(&prompt),
-            "max_tokens": 1000,
-            "temperature": 0.0,
-        }))
-        .header("Authorization", format!("Bearer {}", api_key))
-        .send()
-        .await
-        .unwrap();
 
-    let response_data = response.json::<serde_json::Value>().await.unwrap();
-    let response_prompt = response_data
-        .get("choices")
-        .and_then(|choices| choices[0].get("text"))
-        .and_then(|text| text.as_str())
-        .unwrap_or("No response generated.");
-    println!("{}", response_prompt);
+let response = client
+    .post(api_addr)
+    .json(&json!({
+        "top_p": 1,
+        "stop": "```",
+        "temperature": 0,
+        "suffix": "\n```",
+        "max_tokens": 1000,
+        "presence_penalty": 0,
+        "frequency_penalty": 0,
+        "model": "text-davinci-003",
+        "prompt": build_prompt(&prompt.join(" ")),
+    }))
+    .header("Authorization", format!("Bearer {}", api_key))
+    .send()
+    .await
+    .unwrap();
 
+// Extract and print the status code
+    let response_json: Value = response.json().await?;
+
+    // Extract the text from the JSON
+    if let Some(choices) = response_json.get("choices").and_then(|choices| choices.as_array()) {
+        if let Some(choice) = choices.first() {
+            if let Some(text) = choice.get("text").and_then(|text| text.as_str()) {
+                println!("{}"text);
+            }
+        }
+    }
     Ok(())
 }
 
